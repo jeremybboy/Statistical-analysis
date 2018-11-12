@@ -1,0 +1,1178 @@
+---
+title: "Analyse statistique de données d’aléas marins en mer Méditerranée"
+author: "Jeremy Uzan et Kevin Faou"
+output:
+  html_document:
+    theme: simplex
+    toc: yes
+    toc_depth: 6
+  pdf_document:
+    toc: yes
+    toc_depth: '6'
+    keep_tex: true
+---
+
+Jérémy Uzan & Kévin Faou  
+  
+
+
+
+![**Distribution des fractures dans le bassin d'Alboran** ](alboran.jpg)  
+  
+  
+
+
+
+
+## Introduction  
+  
+  
+Nous avons récupéré plusieurs bases de données de MTD (Mass transport deposit) provenant du bassin d'Alboran méridional en méditérannée.
+En nous appuyant sur les outils statistiques et les travaux de nos prédécesseurs Balint Gersey et Nicolas Prost, nous proposons ici une analyse des données collectées par les géologues de l'ISTEP (Sarah Lafuerza, Elia d'Acremont et Alain Rabaute) de l'Université Pierre et Marie-Curie.
+Ce TER est mené sous la direction de Maud Thomas.
+
+Une première étude approfondie a été faite par nos camarades l'an passé.
+Nous nous sommes penchés sur la question de trouver un modèle de régression linéaire qui correspond assez bien aux données préparant ainsi à de l'éventuelle prédiction. 
+En nous appuyant sur les résultats de nos prédécesseurs, nous nous sommes concentrés sur les modèles qui sont les plus pertinents à savoir le log(surface) et la surface en variable explicative.
+
+
+
+**Plan d'étude**  
+  
+  
+Nous allons tout d'abord étudier le jeu de données, et extraire une synthèse du Data Mining et des analyses faites l'année précédente. 
+Cela nous permettra alors de nous concentrer sur la recherche d'un modèle pertinent pour expliquer la variable surface. Dans un premier temps, on utilisera les modèles de régression linéaires simples. Dans un second temps, nous tenterons de proposer un modèle linéaire généralisé. 
+
+```{r param,comment = " ", echo=FALSE}
+
+library(agricolae)
+library(leaps)
+library(stringr)
+library(readxl)
+
+
+library(xtable)
+geo1 <- c()
+geo2 <- c()
+geo <- c()
+
+```
+
+
+
+
+
+
+
+## 1. Etat des lieux des données, synthèse du travail effectué l'an passé   
+  
+  
+#### A. Variables présentes, données manquantes  
+  
+
+   Nous avons 20 variables : 
+
+- MTD_ID		Identifiant du MTD
+- LAYER	Age chronologique relatif des MTD par rapport aux marqueurs sismiques (en ms)
+- AGE_SISM	Age relatif par rapport aux marqueurs isotopiques (MIS)
+- MTD_CHRON	Numéro des MTD dans l'ordre chronologique (1 est le plus ancien)
+- AGE	Age relatif par rapport aux marqueurs sismiques
+- SURF_KM3	Surface du MTD (= le dépôt) en km2
+- VOL_KM3		Volume calculé du MTD  en km3
+- PORO	Porosité mesurée sur sédiments 
+- DVOL_KM3	Volume décompacté du MTD en km3
+- BURIAL_MS	Enfouissement en millisecondes
+- RUNOUT_KM		Run-out du MTD en KM à partir de la cicatrice d'arrachement observée
+- SCHGHT_M	Hauteur de la cicatrice d'arrachement en mètres (quand il est possible d'identifier celle-ci)
+- SCSLOPE_D	Pente de la cicatrice en degrés
+- MULTI	MTD multiphasé ou non
+- MTD_TYPE	Type du MTD : DF: debris flow - coulée de débris; S: slide - glissement en masse
+- EROD_BASE		Présence d'une base érosive ou non
+- THCK_PQ_M		Epaisseur du Plio-Quaternaire en mètres (sous le MTD)
+- RNOUT_KM		Run-out maximum du MTD en km à partir de la cicatrice d'arrachement supposée
+- DIST_CONT_M		Distance du barycentre du MTD par rapport à un dépôt contouritique proche
+- EQ_DENS		Densité de séismes à l'aplomb du MTD (nombre de séismes par km2, pondération par la magnitude, catalogue 1970-2017, seuls les séismes 0<Mag<=4 et Depth < 40km sont conservés
+
+Nous supprimons la porosité car elle est proportionnelle à l'enfouissement. 
+
+Le jeu de données comprends deux tableaux de respectivement 28 et 38 MTD avec les mêmes variables.   
+
+  
+    
+      
+      
+
+
+####   B. Corrélations possibles entre les variables 
+
+Nous commençons par manipuler les variables et observer des premières corrélations entre variables quantitatives.  
+  
+  
+```{r, echo=FALSE}
+#pairs(geo)
+```
+![**tableau des corrélations** ](pairs2.png)  
+  
+  
+
+
+
+VOLUME corrélé à la surface   
+RUNOUT corrélé à la hauteur de la cicatrice  
+AGE corrélé à  l'enfouissement (négativement !) et  la porosité  
+L'épaisseur corrélée à 1) dist depot (0,7)
+
+Surf en km^3: la variable la plus corrélée à cette variable est le Vol_km^3 et le DVOL_km^3
+RUNOUT_km^3: les deux variables les plus corrélées sont SCSLOPE_D (Pente de la cicatrice en degrés) et SCHGT_M (Hauteur de la cicatrice d'arrachement en mètres (quand il est possible d'identifier celle-ci))
+
+```{r, echo=F, comment = " "}
+library(stats)
+library(agricolae)
+library(leaps)
+library(stringr)
+library(readxl)
+
+
+library(xtable)
+library(dplyr, warn.conflicts = FALSE)
+geo3 <- read_excel("Albojer3.xlsx")
+
+
+names(geo3)<-c("nom","age_chrono","age_marqueur",
+              "classement-age","age_sism","surface",
+              "volume","porosite","volume_dcpt",
+              "enfouissement","runout","haut_cicatrice",
+              "pente_cicatrice","multi","type","ero_base",
+              "epaisseur_ss_mtd","run_out_max","dist_depot",
+              "dens_seisme")
+attach(geo3)
+#multi<-as.factor(multi)
+#type<-as.factor(type)
+
+##Nous commençons par étudier les variables quantitatives
+geo3 <- geo3[ ,-(2:3)]
+geo3<- geo3[ ,-(3)]
+geo3 <- geo3[ ,-(12)]
+geo3<- geo3[ ,-(1)] 
+geo3<- geo3[ ,-(9:11)]  
+geo3<-geo3[,-(10)]
+#head(geo3)
+#hist(surface,freq=FALSE)
+#kurtosis(surface)
+#qqnorm(log(surface),xlim=c(-3,7))
+#boxplot(dens_seisme)
+#boxplot(epaisseur_ss_mtd)
+#cor(geo3)
+
+
+```
+#### C. Séparation des variables qualitatives et quantitatives
+
+Nous avons 13 variables quantitatives et 7 variables qualitatives.
+
+#### D. Synthèse 
+- Le volume décompacté et le volume sont proportionnelles, et il en est de même pour la porosité. Ce sont donc des variables qu'on retire de l'analyse. 
+- Il apparait souvent la valeur 0 sur les variables Runout, Hauteur, Pente. On suppose que ces valeurs sont véritablement 0, et non une absence de résultats. 
+- Dans plusieurs résultats du RUNOUT apparaît "<", c'est une variable qu'on choisit d'écarter de l'analyse, malgré son intérêt potentiel. On garde néanmoins la variable Runout
+- la variable qualitative MULTI possède une grande majorité de N (95%) dans les deux jeux de données. On choisit de la garder. 
+- Nos prédécesseurs ont conjecturé que la loi log normale concorde relativement bien aux jeux de données, notamment pour la surface. 
+
+##2. Analyse des variables quantitatives et qualitatives 
+
+###  A. Régréssion linéaire simple, sélection des variables pertinentes pour prévoir différents Y, "variables ajustée"
+
+**Rappel théorique**  
+On tente de modéliser une variable y ("variable à expliquer"), comme une fonction d'autres variables x=(x1,x2,x3,...,xi)', "variables explicatives" sous forme de vecteur colonne de taille le nombre de variables explicatives (ici i)  
+Donc y=g(x) et le but est de retrouver la fonction g.   
+Dans le modèle linéaire simple, g est affine, donc il existe un vecteur colonne t=(t1,t2,t3,..,ti)' de taille le nombre de variables explicatives tel que   
+y=$\sum_{i=1}^n t_ix_i+ε$ (où epsilon est l'erreur de mesure)
+On dispose d'un échantillon de taille n et de (i+1)-uplets (x,y) et l'objectif est d'estimer le paramètre t
+
+
+Etant donné que nous disposons de deux jeux de données, nous effectuons une première analyse avec le premier jeu, une autre avec le deuxieme, et une autre en groupant les deux jeux de données
+
+Le test de Fisher global permet de tester l'apport global et conjoint de l'ensemble des variables explicatives présentes dans le modèle pour "expliquer" les variations de  Y . L'hypothèse nulle ici est  H0:β1=⋯=βp=0  (l'ensemble des  p  variables explicatives n'apporte pas une information utile pour la prédiction de  Y (qui est dans la suite la surface, puis le renout, puis le volume) sous le modèle linéaire). L'assertion d'intérêt est  
+H1:  au moins l'un des coefficients  βj  est significativement différent de zéro (au moins une des variables explicatives et associée à  Y  après ajustement sur les autres variables explicatives).
+
+####   La surface
+
+Si on retire ou ajoute une variable dans le modèle, toute l'information 
+est modifiée;on opte pour une sélection de variables les plus pertinentes. le critère CP nous indique que le modèle pertinent pour expliquer la surface est un modèle à 3 variables. Celui du BIC: un modèle à 4 variables. 
+On trouve ensuite trouve quelles sont les variables pertinentes pour expliquer la explicative surface: le volume décompacté, le runout, l'épaisseur.
+
+```{r, echo=F, comment = " ", results=F}
+library(stats)
+library(agricolae)
+library(leaps)
+library(stringr)
+library(readxl)
+
+
+library(xtable)
+library(dplyr, warn.conflicts = FALSE)
+geo1 <- read_excel("Albojer51.xlsx")
+geo2 <- read_excel(("Albojer52.xlsx"))
+######## ETUDE SURFACE EN QUANTITATIF EN SUPPRIMANT POROSITE/VOLUME/ 
+
+
+names(geo1)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+names(geo2)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+
+geo <- rbind(geo1,geo2)
+
+
+#attach(geo)
+geo <- geo[ ,-(2:3)]
+geo<- geo[ ,-(3)]
+geo <- geo[ ,-(12)]
+geo<- geo[ ,-(1)] 
+geo<- geo[ ,-(9:11)]  
+geo<-geo[,-(10)]
+geo<-geo[,-(3)]
+geo<-geo[,-(11)]
+geo<-geo[,-(1)]
+geo<-geo[,-(2)] # on enleve la porosit? car li? a l enfouissement 
+reg<-lm(surface~. , data=geo)
+step(reg) #### super cette fonction fait toute la selection
+# de variable (on gagne du temps !!!) ici donne voldcpt.
+
+reg_step<-lm(surface~volume_dcpt)
+a<-regsubsets(surface~.,data=geo)
+a.summary<-summary(a)
+a.summary$which
+#plot(c(1:7),a.summary$cp,'l')
+#plot(c(1:7),a.summary$bic,'l')
+coef_bic<-coef(a,1)
+coef_cp<-coef(a,1)
+
+
+reg_bic<-glm(surface~volume_dcpt, data = geo,family="gaussian")
+
+
+
+
+
+
+
+
+# champion reg step et cp bic a 1 variable vol dcpt
+
+
+```
+Que se soit avec le critère AIC, BIC ou CP, on obtient toujours la même conclusion: 
+Un modèle à une seule variable : le volume décompacté. 
+
+
+####       La surface privé du runout et Hauteur de la cicatrice
+
+
+```{r, echo=F, comment = " ", results="hide"}
+library(stats)
+library(agricolae)
+library(leaps)
+library(stringr)
+library(readxl)
+
+
+library(xtable)
+library(dplyr, warn.conflicts = FALSE)
+geo1 <- read_excel("Albojer51.xlsx")
+geo2 <- read_excel(("Albojer52.xlsx"))
+######## ETUDE SURFACE EN QUANTITATIF EN SUPPRIMANT POROSITE/VOLUME/ 
+
+
+names(geo1)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+names(geo2)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+
+geo <- rbind(geo1,geo2)
+
+
+#attach(geo)
+#geo <- geo[ ,-(2:3)]
+#geo<- geo[ ,-(3)]
+#geo <- geo[ ,-(12)]
+#geo<- geo[ ,-(1)] 
+#geo<- geo[ ,-(9:11)]  
+#geo<-geo[,-(10)]
+#geo<-geo[,-(3)]
+#geo<-geo[,-(11)]
+#geo<-geo[,-(1)]
+#geo<-geo[,-(5:6)] # on enleve le runout et la hauteur de la cicatrice car 
+# trop de donn?es NA
+#geo<-geo[,-(2)] # on enleve la porosit? car li? a l enfouissement 
+
+#geo<-geo[,-(2)] # on enleve la porosit? car li? a l enfouissement 
+#reg<-lm(surface~. , data=geo)
+#step(reg) #### super cette fonction fait toute la selection
+# de variable (on gagne du temps !!!) ici donne voldcpt.
+#summary(reg)
+#plot(reg)
+
+#reg_step<-lm(surface~volume_dcpt)
+#a<-regsubsets(surface~.,data=geo)
+#a.summary<-summary(a)
+#a.summary$which
+#plot(c(1:5),a.summary$cp,'l')
+#plot(c(1:5),a.summary$bic,'l')
+#coef_bic<-coef(a,1)
+#coef_cp<-coef(a,1)
+
+#reg_bic<-glm(surface~volume_dcpt, data = geo,family="gaussian")
+
+
+```
+
+On obtient le même résultat: volume_dcpt
+
+
+ ![ ](surfvol.png)
+
+```{r, echo=F, comment=""}
+library(stats)
+library(agricolae)
+library(leaps)
+library(stringr)
+library(readxl)
+
+
+library(xtable)
+library(dplyr, warn.conflicts = FALSE)
+#geo1 <- read_excel("Albojer51.xlsx")
+#geo2 <- read_excel(("Albojer52.xlsx"))
+
+
+
+
+names(geo1)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+names(geo2)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+
+#geo <- rbind(geo1,geo2)
+
+#attach(geo)
+#geo <- geo[ ,-(2:3)]
+#geo<- geo[ ,-(3)]
+#geo <- geo[ ,-(12)]
+#geo<- geo[ ,-(1)] 
+#geo<- geo[ ,-(9:11)]  
+#geo<-geo[,-(10)]
+#geo<-geo[,-(3)]
+#geo<-geo[,-(11)]
+#geo<-geo[,-(1)]
+#geo<-geo[,-(2)]
+#model_bic <- lm(surface~volume_dcpt)
+#Y_predict = predict(model_bic,geo)
+#X = seq(-10,10,by = 0.1)
+#n = length(X)
+#par(bg='beige')
+#plot(seq(-10,10, length=length(Y_predict)),
+#     Y_predict, lwd = 2, col=2, type="l",
+#     ylim = c(min(surface), max(surface)),
+#     xlab='temps',ylab='maximum',main='Prédiction : modèle BIC')
+
+#points(seq(-10,10, length=length(Y_predict)),
+#      surface, type = 'b', lwd = 1, col = 1, pch = 1, lty = 2)
+
+#lines( seq(-10,10, length=length(Y_predict)) , Y_predict , lwd = 2)
+
+#legend('topright', c('estimation','observations'),
+ #      col = c('darkred','grey'), 
+  #     lwd = c(2,1,2), pch = c(-1,1,-1), lty = c(1,2,1))
+#grid()
+```
+
+
+
+  Le modèle avec uniquement le volume_dcpt semble bien adapté aux données de la surface, sauf sur quelques points extrêmes. 
+
+
+#### la log(surface)
+
+
+```{r, echo=F, comment = " "}
+library(stats)
+library(agricolae)
+library(leaps)
+library(stringr)
+library(readxl)
+
+
+library(xtable)
+library(dplyr, warn.conflicts = FALSE)
+geo1 <- read_excel("Albojer51.xlsx")
+geo2 <- read_excel(("Albojer52.xlsx"))
+######## ETUDE SURFACE EN QUANTITATIF EN SUPPRIMANT POROSITE/VOLUME/ 
+
+
+names(geo1)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+names(geo2)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+#geo <- rbind(geo1,geo2)
+
+#attach(geo)
+geo <- geo[ ,-(2:3)]
+geo<- geo[ ,-(3)]
+geo <- geo[ ,-(12)]
+geo<- geo[ ,-(1)] 
+geo<- geo[ ,-(9:11)]  
+geo<-geo[,-(10)]
+geo<-geo[,-(3)]
+geo<-geo[,-(11)]
+geo<-geo[,-(1)]
+geo<-geo[,-(2)] # on enleve la porosit? car li? a l enfouissement 
+#reg<-lm(log(surface)~. , data=geo,family="gaussian")
+#step(reg) #### super cette fonction fait toute la selection
+# de variable (on gagne du temps !!!) ici donne voldcpt,epaisseur ss mtd,
+#runout et dist depot
+
+
+#reg_step<-lm(log(surface)~volume_dcpt+epaisseur_ss_mtd+runout+dist_depot)
+#a<-regsubsets(log(surface)~.,data=geo)
+#a.summary<-summary(a)
+#a.summary$which
+#plot(c(1:7),a.summary$cp,'l')
+#plot(c(1:7),a.summary$bic,'l')
+#coef_bic<-coef(a,2)
+#coef_cp<-coef(a,4)
+#par(mfrow=c(1,1))
+
+
+#reg_bic<-glm(log(surface)~volume_dcpt+epaisseur_ss_mtd, data = geo,family="gaussian")
+#plot(reg_bic)
+
+
+
+
+# on test avec un tes du chi2 lequel des 2 ?od?les es le meilleur
+#si la p valeur du test est plus grande que 0,05 c'est le premier mod?le qui est sensiblement meilleur
+# sinon le deuxieme donc ici le  modelebic meilleur que celui donne par le modele 
+#complet 
+
+
+
+
+# champion reg step
+
+#summary.glm(reg_step)
+
+```
+
+
+Utilisation de la fonction STEP
+BILAN 1/ le modèle avec les variables volume décompacté, runout, dist_depot et épaisseur est pertinent pour modéliser les valeurs prises par variable surface qui représente le dépot en km^2 
+
+ ![ ](cplogsurf.png)
+ 
+Bilan2/ avec le critère BIC, on a seulement un modèle à 2 variables: volume_dcpt et epaisseur sous mtd
+![ ](biclogsurf.png)
+
+```{r,echo=F, comment = " "}
+
+#reg1<-lm(surface~volume+dens_seisme+epaisseur_ss_mtd+ #dist_depot+pente_cicatrice+enfouissement)
+#summary(reg1)
+#anova(reg1)
+
+#reg2<-lm(surface~.,data = geo3)
+#summary(reg2)
+#plot(reg2)
+
+
+
+#resid.st <- rstudent(reg2)
+#nom_var <- names(geo3)
+#n <- nrow(geo3)
+#val_aber <- (1:n)[abs(resid.st)>2]  # indices des valeurs aberrantes (pour les signaler dans les graphiques)
+par(mfrow=c(2,2))
+
+
+#a<-regsubsets(surface~.,data=geo3,method = "exhaustive")
+#a.summary<-summary(a)
+#a.summary$which
+#plot(c(1:8),a.summary$cp,'l')
+#plot(c(1:8),a.summary$bic,'l')
+
+
+###+plot(c(1:8),a.summary$adjr2,'l')
+#a.cp<-coef(a,4)
+#a.bic<-coef(a,3)
+###a.R2a<-coef(a,)
+ #/ on fait un modèle de régression linéaire mais inéfficace car si on retire ou ajoute une variable dans le modèle, toute l'information 
+#est modifiée 
+#on opte pour une s?lection de variables les plus pertinentes. le crit?re CP nous indique que le mod?le pertinent pour 
+# expliquer la surface est un mod?le ? 3 variables. Celui du BIC: un mod?le ? 4 variables
+#ensuite, on trouve quels sont les variables pertinentes pour expliquer la surface
+# le volume, le volume d?compact?, le runout, l'?ppaisseur
+
+##ON prend ensuite le RUNOUT comme variable réponse; 
+
+#reg3<-lm(runout~.,data = geo3)
+#summary(reg1)
+#summary(reg3)
+#plot(reg3)
+#anova(reg1)
+#anova(reg3)
+#b<-regsubsets(runout~.,data=geo3,method = "exhaustive")
+#b.summary<-summary(b)
+#b.summary$which
+#plot(c(1:8),b.summary$cp,'l')
+#plot(c(1:8),b.summary$bic,'l')
+#b.cp<-coef(b,5)
+#b.bic<-coef(b,5)
+
+#Cette fois-ci, le modèle le plus pertinent est un modèle à 5 variables,
+#notamment l'age (MTD chron), la hauteur de la cicatrice, le volume
+#et la pente de la cicatrice. 
+#reg4<-lm(volume~.,data = geo3)
+#summary(reg1)
+#summary(reg4)
+#anova(reg1)
+#anova(reg4)
+#plot(reg4)
+#c<-regsubsets(volume~.,data=geo3,method = "exhaustive")
+#c.summary<-summary(c)
+#c.summary$which
+#plot(c(1:8),c.summary$cp,'l')
+#plot(c(1:8),c.summary$bic,'l')
+###+plot(c(1:8),a.summary$adjr2,'l')
+#c.cp<-coef(c,5)
+#c.bic<-coef(c,5)
+
+#mod = lm(runout~.,data = geo3)
+#e = regsubsets(runout~.,data=geo3,int=T,nbest=,nvmax=,method='exh')
+#resume = summary(e)
+#size <- as.double(rownames(resume$wh))+1
+#par (mfrow= c(2,2),bg='beige')
+#plot(e,scale="Cp",main='Sélection des variables : Cp')
+#plot(e,scale="r2",main='Sélection des variables : R2')
+#plot(e,scale="adjr2",main="Sélection des variables : R2 ajusté")
+#plot(e,scale="bic",main='Sélection des variables : BIC')
+##Le but ici est d'utiliser les différents critères de sélection 
+#de variables, à savoir le $C_p$ de Mallows
+plot(log(surface)~log(volume_dcpt))
+
+
+
+#regbic<-lm(log(surface)~haut_cicatrice+log(volume_dcpt))
+#summary(regbic)
+#plot(regbic)
+#regbiccc<-lm(surface~volume_dcpt)
+
+#regcp<-lm(surface~haut_cicatrice+volume_dcpt+epaisseur_ss_mtd)
+#summary(regcp)
+#plot(regcp)
+
+#mod <- lm(RUNOUT_KM~., data=geo)
+#summary(mod)
+```
+
+
+
+
+
+on regarde la prédiction : 
+```{r, echo=F}
+library(stats)
+library(agricolae)
+library(leaps)
+library(stringr)
+library(readxl)
+
+
+library(xtable)
+library(dplyr, warn.conflicts = FALSE)
+geo1 <- read_excel("Albojer51.xlsx")
+geo2 <- read_excel(("Albojer52.xlsx"))
+
+
+
+
+names(geo1)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+names(geo2)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+
+#geo <- rbind(geo1,geo2)
+
+#attach(geo)
+ 
+#geo <- geo[ ,-(2:3)]
+#geo<- geo[ ,-(3)]
+#geo <- geo[ ,-(12)]
+#geo<- geo[ ,-(1)] 
+#geo<- geo[ ,-(9:11)]  
+#geo<-geo[,-(10)]
+#geo<-geo[,-(3)]
+#geo<-geo[,-(11)]
+#geo<-geo[,-(1)]
+#geo<-geo[,-(2)]
+#model_bic <- lm(log(surface)~cbind(volume_dcpt,epaisseur_ss_mtd))
+#Y_predict = predict(model_bic,geo)
+#X = seq(-10,10,by = 0.1)
+#n = length(X)
+#par(bg='beige')
+#plot(seq(-10,10, length=length(Y_predict)),
+#     Y_predict, lwd = 2, col=2, type="l",
+#     ylim = c(min(log(surface)), max(log(surface))),
+#     xlab='temps',ylab='maximum',main='Prédiction : modèle BIC')
+
+#points(seq(-10,10, length=length(Y_predict)),
+#       surface, type = 'b', lwd = 1, col = 1, pch = 1, lty = 2)
+
+#lines( seq(-10,10, length=length(Y_predict)) , Y_predict , lwd = 2)
+
+#legend('topright', c('estimation','observations'),
+ #      col = c('darkred','grey'), 
+  #     lwd = c(2,1,2), pch = c(-1,1,-1), lty = c(1,2,1))
+#grid()
+```
+Moins bon que précédemment
+ ![ ](logsurfvolepai.png)
+
+
+
+
+
+
+#### Le Runout
+
+On effectue le même travail en posant le renout comme variable à expliquer 
+Cette fois-ci, le modèle le plus pertinent est un modèle à 5 variables avec 
+notamment l'age (MTD chron), la hauteur de la cicatrice, le volume
+et la pente de la cicatrice.
+
+####BILAN
+
+On se concentre désormais sur le modèle avec la surface en variable réponse Y et tentons de reproduire un modèle qui correspond le mieux. 
+En effet, le modèle linéaire simple suppose que les vairbales explicatives (comme le volume, la porosité) sont non aléatoires et mesurables sans erreur.
+De plus, l'erreur de mesure ne suit pas nécessairement une distribution normale et la variance n'est pas tout le temps constante
+Enfin, si la variable Y (ici la surface) ne suit pas la distribution d'une loi normale, mais une autre famille de la classe exponentielle, on utilise les modèles linéaires généralisés.
+
+###    B. Analyse des variables qualitatives 
+####    Transformation et sélection du jeu de données
+Pour les variables qualitatives, nous choisissons de séléctionner les données du tableau qui contient le plus d'information. En effet, on remarque que l'age chronologique est plus facile à lire dans le tableau Albojer53.xlsx. 
+On a dans ce tableau différents Age chronologique relatif des MTD par rapport aux marqueurs sismiques en ms très variables avec des données facilement comparables. 
+Dans l'autre tableau, on observe les résultats "MTD superficiel", ou "surf" ou même des tranche 100-150.
+
+  
+####   Régréssion linéaire simple
+Le but de cette partie est d'analyser les effets liés à l'age sismique, au caractère multiphasé et à l'érosion sur l'age sismique 
+On remarque que l'age sismique est lié au l'age chronologique, ce qui est plutot logique. 
+Par contre, le caractère multiphasé et l'érosion ne semble pas liés à l'age.
+
+Ici, la variable réponse est age_sism
+```{r, echo=F, comment = " "}
+library(stats)
+library(agricolae)
+library(leaps)
+library(stringr)
+library(readxl)
+
+
+library(xtable)
+library(dplyr, warn.conflicts = FALSE)
+geo <- read_excel("Albojer53.xlsx")
+
+
+
+names(geo)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+
+#attach(geo)
+#geo <- geo[ ,-4]
+#geo<- geo[ ,-(5:12)]
+#geo <- geo[ ,-(8:11)]
+#geo <- geo[ ,-3]
+#geo <- geo[ ,-5]
+#On l'enlève car tout est "S"
+#geo<- geo [,-1]
+#geo<- geo [,-5]
+#On l'enlève car tout est "no"
+#head(geo)
+
+
+### ne garde que les donnees qualitatives
+#regression<-lm(age_chrono~.,data=geo)
+#summary(regression)
+#age_sism_QT4c = geo[geo$nom=="QT4-c",]
+#age_sism_QT4b = geo[geo$nom=="QT4-b",]
+#age_sism_QT4a = geo[geo$nom=="QT4-a",]
+#age_sism_QT3 = geo[geo$nom=="QT3",]
+ 
+#regression2<-lm(age_chrono~multi, data=geo)
+#summary(regression2)
+
+#regression3<-lm(age_chrono~ero_base, data=geo)
+#summary(regression3)
+
+```
+
+Nous examinons ensuite les effets liés à l'age sismique, au caractère multiphasé et à l'érosion sur la surface
+On remarque que l'age sismique est lié au l'age chronologique, ce qui est plutot logique. 
+Par contre, le caractère multiphasé et l'érosion ne semble pas liés à l'age.
+
+Ici, la variable réponse est surface
+
+L'anova nous permet de constater que la surface est linéairement liée au caractère multiphasé ou non des MTD
+
+Une deuxieme analyse de la variance nous permet de constater que la log(surface) est encore plus  linéairement liée au caractère multiphasé ou non des MTD
+![*Anova* ](anovalogsurf.png)
+
+
+On peut remarquer que les MTD faisant parties de la classe d'âge QT3 ont une surface plus étalée, et relativement plus élevée en moyenne comparée à la surface des MTD dont les classes d'âge sont QT4-C ou Halocene
+
+![*Boxplot* ](boxplot.png)
+
+```{r, echo=F, comment = " "}
+library(stats)
+library(agricolae)
+library(leaps)
+library(stringr)
+library(readxl)
+
+
+library(xtable)
+library(dplyr, warn.conflicts = FALSE)
+
+geo <- read_excel("Albojer3.xlsx")
+names(geo)<-c("nom","age_chrono","age_marqueur",
+              "classement-age","age_sism","surface",
+              "volume","porosite","volume_dcpt",
+              "enfouissement","runout","haut_cicatrice",
+              "pente_cicatrice","multi","type","ero_base",
+              "epaisseur_ss_mtd","run_out_max","dist_depot",
+              "dens_seisme")
+#attach(geo)
+
+#geo <- geo[ ,-4]
+#geo<- geo[ ,-(6:12)]
+#geo <- geo[ ,-(9:12)]
+#geo<- geo [,-1]
+#geo<- geo [,-2]
+#geo<- geo [,-1]
+#age_sism<-as.factor(age_sism)
+#multi<-as.factor(multi)
+#type<-as.factor(type)
+#ero_base<-as.factor(ero_base)
+
+#par(mfrow=c(1,1))
+#boxplot(surface~age_sism, main="Boxplot de la surface des MTD en f de l'age sismique")
+
+
+#reg<-lm(surface~.,data=geo)
+#anova(reg)
+
+
+
+#reg_effet<-lm(log(surface)~.,data = geo)
+#anova(reg_effet)
+
+
+
+#reg_multi<-lm(log(surface)~multi,data=geo)
+#anova(reg_multi)
+
+```
+
+
+##3. Modèle linéaire généralisé, avec la surface en variable explicative
+Ces modèles ont été introduit par Nelder et Wedderburn en 1972. 
+
+### A.Théorie, principe
+Les modèles linéaires généralisés sont une extension des modèles linéaires classiques. 
+Le tableau proposé dans le cours de l'ISFA de Lyon permet d'observer rapidement les différence entre ces deux modèles
+![*Modèles linéaires généralisé et modèles linéaires* ](glm.png)
+
+On suppose toujours que les observations sont indépendantes (ou au moins non corréles). 
+Mais la variance n'est plus constante et la normalité n'est plus nécessaire. 
+
+Les observations $Y_1,\dots,Y_n$ sont indépendantes et suivent une loi qui appartient à la famille exponentielle (Normale, Poisson, Binomiale, Gamma, etc)
+Ceci est la première des trois composantes des modèles linéaires généralisés
+La deuxième est la composante systématique, elle attribue à chaque obeservation un prédicteur linéaire
+![*prédicteur linéaire*](predictlineaire.png)
+
+Enfin, l'espérance μi de Yi (attribut de la première composante) est liée au prédicteur linéaire ηi par une "fonction de lien" g. Le troisième composant fait donc le lien entre les deux premier. 
+
+![*composante 3*](composante3.png)
+
+On peut donc obtenir η en transformant μ par la fonction de lien. 
+l'espérance des Yi est donc combinaison linéaire des paramètres β par une fonction g. 
+On obtient les prédictions en faisant l'inverse de la fonction de lien, g−1, qu'on appelle la fonction "de réponse". 
+Les fonctions de lien les plus fréquemment utilisées sont :  
+
+
+![*fonction de lien classiques*](fonctionlien.png)
+
+### B. Application
+
+#### La log(surface) avec les variables quantitatives
+
+
+
+```{r, echo=F, comment = " "}
+library(stats)
+library(agricolae)
+library(leaps)
+library(stringr)
+library(readxl)
+
+
+library(xtable)
+library(dplyr, warn.conflicts = FALSE)
+geo1 <- read_excel("Albojer51.xlsx")
+geo2 <- read_excel(("Albojer52.xlsx"))
+######## ETUDE SURFACE EN QUANTITATIF EN SUPPRIMANT POROSITE/VOLUME/ 
+
+
+names(geo1)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+names(geo2)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+#geo <- rbind(geo1,geo2)
+
+
+#attach(geo)
+#geo <- geo[ ,-(2:3)]
+#geo<- geo[ ,-(3)]
+#geo <- geo[ ,-(12)]
+#geo<- geo[ ,-(1)] 
+#geo<- geo[ ,-(9:11)]  
+#geo<-geo[,-(10)]
+#geo<-geo[,-(3)]
+#geo<-geo[,-(11)]
+#geo<-geo[,-(1)]
+#geo<-geo[,-(5:6)] # on enleve le runout et la hauteur de la cicatrice car 
+# trop de donn?es NA
+#geo<-geo[,-(2)] # on enleve la porosit? car li? a l enfouissement 
+#reg_glm_tout<-glm(log(surface)~. , data=geo,family="gaussian")
+#step(reg_glm_tout) #### super cette fonction fait toute la selection
+# de variable (on gagne du temps !!!) ici donne voldcpt,epaisseur ss mtd,
+#summary(reg_glm_tout)
+#plot(reg_glm_tout)
+
+#reg_step<-glm(log(surface)~volume_dcpt+epaisseur_ss_mtd)
+#a<-regsubsets(log(surface)~.,data=geo)
+#a.summary<-summary(a)
+#a.summary$which
+#plot(c(1:5),a.summary$cp,'l')
+#plot(c(1:5),a.summary$bic,'l')
+#coef_bic<-coef(a,2)
+#coef_cp<-coef(a,2)
+#par(mfrow=c(2,4))
+
+
+#reg_bic<-glm(log(surface)~volume_dcpt+epaisseur_ss_mtd, data = geo,family="gaussian")
+#plot(reg_bic)
+
+
+
+#anova(reg_bic,reg_glm_tout,test="Chisq") #p=0,7303 bic meilleur
+
+#anova(reg_bic,reg_step,test="Chisq") # c est les meme
+
+#anova(reg_step,reg_glm_tout,test="Chisq") # p=0,7303 step meilleur
+
+# champion reg step
+
+#summary.glm(reg_step)
+#anova(reg_step,test = "Chisq")
+```
+
+Nous essayons différentes familles de lois exponentielles pour le modèle GLM, mais aucune ne permet d'extraire un ou plusieurs modèles viables, à cause des la nature des données (beaucoup de 0)
+Les lois discrètes (binomiale, poisson) ne correspondent pas. 
+Seule la loi gaussienne peut fonctionner, mais cela revient à effectuer une régression linéaire simple. 
+
+On opte pour le modèle linéaire gaussien classique et on essaye le GLM avec les variables qualitatives. 
+
+
+#### GLM de La log(surface) pour les variables qualitatives 
+
+On ne garde que les donnees qualitatives et complete
+variable en factor : age_sism, multi, type, ero_base, pock
+On effectue une regression lineaire 
+
+Puis on effectue un test pour le GLM avec la fonction Gamma.
+
+DEFINITION:
+On appelle deviance d'un modele lineaire generalisé la valeur
+ D=-2($lm$ - $ls$), où ls est la log vraisemblance du modèle parfaitement ajusté et lm la log vraisemblance du modèle considéré
+ On peut donc voir la déviance comme une extension de la somme des carrés des résidus de modèle linéaire gaussien d'ailleurs si l'on applique glm(Y~A+B+C,family="gaussian") on obtient les memes resultats qu'un modele lineaire gaussien 
+
+```{r, echo=F, comment = " "}
+library(stats)
+library(agricolae)
+library(leaps)
+library(stringr)
+library(readxl)
+
+
+library(xtable)
+library(dplyr, warn.conflicts = FALSE)
+geo1 <- read_excel("Albojer51.xlsx")
+geo2 <- read_excel(("Albojer52.xlsx"))
+
+names(geo1)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+names(geo2)<-c("nom","age_chrono","age_marqueur",
+               "classement-age","age_sism","surface",
+               "volume","porosite","volume_dcpt",
+               "enfouissement","runout","haut_cicatrice",
+               "pente_cicatrice","multi","type","ero_base",
+               "epaisseur_ss_mtd","run_out_max","dist_depot",
+               "dens_seisme","pock")
+
+#geo <- rbind(geo1,geo2)
+
+#attach(geo)
+
+#geo <- geo[ ,-4]
+#geo<- geo[ ,-(6:12)]
+#geo <- geo[ ,-(9:12)]
+#geo<- geo [,-1]
+#geo<- geo [,-2]
+#geo<- geo [,-1]
+### ne garde que les donnees qualitatives et complete
+#geo<-na.omit(geo)
+
+
+################### variable en factor ############################
+
+#age_sism<-as.factor(age_sism)
+#multi<-as.factor(multi)
+#type<-as.factor(type)
+#ero_base<-as.factor(ero_base)
+#pock<-as.factor(pock)
+
+
+#################### regression lineaire ############################
+
+#reg<-lm(log(surface)~. ,data=geo)
+#step(reg)
+#summary(reg)
+#regstep<-lm(log(surface) ~ multi + ero_base + pock ,data=geo)
+##########
+#a<-regsubsets(surface~.,data<-geo)
+#a.summary<-summary(a)
+#a.summary$which
+#par(mfrow=c(1,2))
+#plot(c(1:8),a.summary$bic,'l')
+#plot(c(1:8),a.summary$cp,'l')
+#a.bic<-coef(a,1)
+
+
+
+#reg_multi<-lm(log(surface)~ multi,data=geo)
+
+#anova(reg_multi,regstep,test="Chisq")
+#print(qchisq(.95,2))# < sum of sq donc reg step meilleur 
+
+#anova(reg_multi,reg,test="Chisq")
+#print(qchisq(.95,7))# > sum of sq donc regmulti meilleur
+
+#anova(regstep, reg ,test="Chisq")
+#print(qchisq(.95,5)) # > sum of sq donc regstep meilleur 
+
+
+
+
+#plot(rstudent(regstep)) # on regarde les résidus ca va 3/4 au dessus des seuil
+#abline(h=2,col="red");abline(h=-2,col="red")
+
+
+############################ glm famille gamma #########
+#reglm_gamma<-glm(surface~multi+pock+type,data=geo,family = "Gamma") 
+#on ne peut pas mettre age sismique car l'algo produit des NANs, on ne le mets pas ici
+#step(reglm_gamma)
+#regstepglm<-glm(surface~multi+type,data=geo,family="Gamma")
+#reg_multiglm<-glm(surface~multi,data=geo,family="Gamma")
+
+#anova(reglm_gamma,test="Chisq")
+# multi et type sont significatifs tandis que pock ne l'est pas  
+
+
+#On compare ici les modeles entre eux
+#anova(regstepglm,reglm_gamma,test="Chisq" )
+#print(qchisq(.95,1))# >deviance donc reglsteplglm meilleur 
+# le quantile d'une khi2 ? 1 ddliberte est plus grandque la deviance ainsi on prefere 
+#le modele sans le facteur pock qui n'est pas significatif
+#plot(regstepglm) # on voit sur le qqplot que le mod?le n'est pas bien adapt? surtout pour les valeurs extremes
+
+
+#puis
+#anova(reg_multiglm,regstepglm,test="Chisq")
+#print(qchisq(.95,1))# <deviance donc reglsteplglm meilleur
+
+# Conclusions
+ 
+# Si l'on veut proposer un mod?le lin?aire g?n?ralis? ou la famille de loi
+# est une gamma ,le meilleur en terme de deviance et perte de degr?s de libert?
+# serait le mod?le compos? des facteur type et multi
+
+
+#definition: on appelle deviance d'un modele lineaire generalis? la valeur
+
+#     D=-2($lm$ - $ls$)
+# ou ls est la log vraisemblance du mod?le parfaitement ajust?
+# et lm la log vraisemblance du mod?le consid?r?
+# On peut donc voir la d?viance comme une extension de la somme des carr?s des r?sidus
+# de mod?le lin?aire gaussien 
+# d'ailleurs si l'on applique glm(Y~A+B+C,family="gaussian") on obtient les memes resultats 
+# qu'un modele lineaire gaussien 
+
+```
+![*résidu studentisé* ](resistu.png)  
+Les résidus sont pour la majorité en dessous du seuil de rejet.
+
+GLM: 
+- On ne peut pas mettre age sismique car l'algo produit des NANs.
+- les tests donnent que multi et type sont significatifs tandis que pock ne l'est pas 
+- On compare les modèle GLM : surface avec les variable multi et type contre surface avec les variables multi, type **ET** pock  
+
+![ ](devianceee.png) 
+  
+    
+      
+      
+le quantile d'une khi2 à 1 ddliberte est plus grandque la deviance ainsi on prefere 
+le modele sans le facteur pock qui n'est pas significatif
+
+
+![ ](deviancee.png)  
+
+
+inférieur à la deviance donc le modèle avec type et multi est  meilleur
+
+
+Conclusions
+ 
+Si l'on veut proposer un modèle linéaire généralisé ou la famille de loi
+est une gamma ,le meilleur en terme de deviance et perte de degrés de liberté
+serait le modèle composé des facteurs type et multi
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+## Conclusion et ouverture de recherche
+
+  
+Les travaux précédents et l'analyse fait dans ce travail a permis d'extraire plusieurs conclusions 
+La variable surface est manifestement une variable REPONSE et la variable du volume_dcpt permet d'estimer (avec une certaine erreur) ladite variable surface 
+
+D'autres variables réponses comme le Runout peuvent être expliquées par les variables volume, la hauteur et la pente de la cicatrice. 
+
+Il est par ailleurs important de signaler l'importance des variables comme l'age, la surface, le volume_dcpt comparées à d'autres variables comme pockmark ou encore type, qui apparaissent plus isolée, évoluant "indépendamment des autres"
+
+Utiliser la fonction CUT
+Ouverture: En utilisant la fonction Cut, on pourrait transformer les variables quantitatives en qualitative (en créer des groupes) et tester le modèle avec la variable volume_dcpt et la variable multi. 
+ 
+On peut imaginer que combiner toutes les variables quantitatives et qualitative ensemble pourrait donner un modèle encore plus pertinent. 
+
+Etant donné les résultats de l'analyse qualitative et quantitative, et l'utilisation des GLM 
+
+Nos recherches nous font aboutir à l'élaboration du modèle avec une variable qualitative (multi) et une variable quantitative
+
+log(surface)=β0+β1volume_dcpt+β2multi+ε.
+ 
+
+
+
+## Références 
+
+- *Rapport : Analyse de données de glissements de terrain sous-marins* Balint Gersey, Nicolas Prost
+- *Rapport : Étude des glissements gravitaires sous-marins dans le bassin d’Alboran méridional* Martin Jollivet-Castelot
+- *Étude des glissements gravitaires sous-marins dans le bassin d’Alboran méridional*
+- *Generalized Linear Models* P. McCullagh and J.A. Nelder 
+- *Régression avec R* (Pierre-André Cornillon et Eric Matzner-Lober) (*langage Rstudio*)
+- Cours :*Statistique mathématique* Arnaud Guyader (*cours théorique de statistique*)
+- *Submarine landslides of the Mediterranean Sea: Trigger mechanisms, dynamics, and frequency-magnitude distribution* Roger Urgeles and Angelo Camerlenghi
+- *An Introduction to generalized linear model* Annette J.Dobson 
+- Cours: *Modèles linéaires & GLMs analyse Logit & régression de Poisson Analyse d'un portefeuille d'assurance Algorithm IRWLS avec R* Julien Tomas
+
+
+
+
